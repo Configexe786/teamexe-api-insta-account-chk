@@ -17,109 +17,84 @@ def is_valid_key(user_key):
     except:
         return False
 
-# --- INSTAGRAM LOGIN ROUTE ---
 @app.route('/iglogin', methods=['GET'])
 def ig_login():
-    user = request.args.get('user')
-    password = request.args.get('pass')
+    usex = request.args.get('user')
+    pww = request.args.get('pass')
     api_key = request.args.get('key')
 
     # Security Check
     if not api_key or not is_valid_key(api_key):
-        return jsonify({
-            "status": "error", 
-            "message": "Invalid or Missing API Key",
-            "credits": "@Teamexemods"
-        }), 403
+        return jsonify({"status": "error", "message": "Invalid API Key"}), 403
 
-    if not user or not password:
-        return jsonify({"status": "error", "message": "Username and Password are required"}), 400
+    if not usex or not pww:
+        return jsonify({"status": "error", "message": "User/Pass missing"}), 400
 
+    # --- EXACT TERMUX LOGIC ---
     session = requests.Session()
-    
-    # Randomizing User-Agent slightly for better success rate
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    
     session.headers.update({
-        "User-Agent": user_agent,
-        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
     })
 
     try:
-        # Step 1: Initial request to get cookies and CSRF
-        login_url = "https://www.instagram.com/accounts/login/"
-        session.get(login_url, timeout=15)
+        # Get CSRF
+        session.get("https://www.instagram.com/accounts/login/", timeout=10)
         csrf_token = session.cookies.get("csrftoken")
         
         if not csrf_token:
-            return jsonify({"status": "error", "message": "CSRF Token generation failed. IP might be rate-limited."}), 500
+            return jsonify({"status": "error", "message": "CSRF not found"}), 500
 
-        # Step 2: Preparing AJAX Login
-        login_ajax_url = "https://www.instagram.com/accounts/login/ajax/"
-        
-        # Time-based password encryption prefix used by Instagram
-        enc_password = f"#PWD_INSTAGRAM_BROWSER:0:{int(time.time())}:{password}"
-        
-        payload = {
-            "username": user,
-            "enc_password": enc_password,
+        # Login Data
+        p = {
+            "username": usex,
+            "enc_password": f"#PWD_INSTAGRAM_BROWSER:0:{int(time.time())}:{pww}",
             "queryParams": {},
             "optIntoOneTap": "false"
         }
-        
-        headers = {
+        h = {
             "X-CSRFToken": csrf_token,
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": login_url,
+            "Referer": "https://www.instagram.com/accounts/login/",
             "Content-Type": "application/x-www-form-urlencoded"
         }
 
-        response = session.post(login_ajax_url, data=payload, headers=headers, timeout=20)
+        # Send Request
+        r = session.post(
+            "https://www.instagram.com/accounts/login/ajax/",
+            data=p,
+            headers=h,
+            timeout=20
+        )
         
-        # Checking if response is valid JSON
-        try:
-            result = response.json()
-        except:
-            return jsonify({"status": "error", "message": "Invalid response from Instagram. Possible IP block."}), 500
+        result = r.json()
 
-        # Step 3: Detailed Response Logic
-        if result.get("authenticated") == True:
+        # Final Verification (Termux logic based)
+        if "userId" in result:
             return jsonify({
                 "status": "success",
                 "message": "Login Success ✅",
-                "user_id": result.get("userId"),
+                "userId": result['userId'],
                 "credits": "@Configexe"
             })
-        
-        elif result.get("user") == True and result.get("authenticated") == False:
+        elif result.get("status") == "fail":
             return jsonify({
                 "status": "failed",
-                "message": "Incorrect Password ❌",
+                "message": "Incorrect Details",
                 "credits": "@Configexe"
             })
-            
         elif "checkpoint_url" in result:
+            # Pointing to the specific challenge link
             return jsonify({
                 "status": "checkpoint",
-                "message": "Security Checkpoint / 2FA Required ⚠️",
-                "checkpoint_url": f"https://www.instagram.com{result.get('checkpoint_url')}",
+                "message": "Security Checkpoint ⚠️ (Login from App first)",
+                "url": f"https://www.instagram.com{result['checkpoint_url']}",
                 "credits": "@Configexe"
             })
-            
-        elif result.get("status") == "fail":
-            # Instagram often returns 'fail' for suspicious attempts even if pass is correct
-            msg = result.get("message", "Incorrect Details or Request Blocked")
-            return jsonify({
-                "status": "failed",
-                "message": f"{msg} ❌",
-                "credits": "@Configexe"
-            })
-        
         else:
             return jsonify({
                 "status": "unknown",
                 "message": "Unknown Response",
-                "full_response": result
+                "full_data": result
             })
 
     except Exception as e:
@@ -127,4 +102,4 @@ def ig_login():
 
 if __name__ == "__main__":
     app.run()
-    
+            
