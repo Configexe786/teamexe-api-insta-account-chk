@@ -39,46 +39,47 @@ def insta_downloader():
             mode = "story"
             session = requests.Session()
             
-            # Step 1: Token aur Referer lena (InDown ki security bypass karne ke liye)
-            main_res = session.get("https://indown.io/insta-stories-download")
+            # Browser headers set karna zaroori hai
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://indown.io/insta-stories-download"
+            }
+            
+            # Step 1: Initial Page Load (Cookies ke liye)
+            main_res = session.get("https://indown.io/insta-stories-download", headers=headers)
             soup_main = BeautifulSoup(main_res.text, "html.parser")
             
-            # Error Fix: Check kar rahe hain ki tokens mil rahe hain ya nahi
-            try:
-                token_input = soup_main.find("input", {"name": "_token"})
-                referer_input = soup_main.find("input", {"name": "referer"})
-                
-                if not token_input or not referer_input:
-                    return jsonify({"status": "error", "message": "Failed to bypass security tokens"}), 500
-                
-                csrf_token = token_input["value"]
-                referer = referer_input["value"]
-            except Exception:
-                return jsonify({"status": "error", "message": "InDown security tokens not found"}), 500
+            # Step 2: Tokens ko Safety ke saath nikalna
+            csrf_token = ""
+            referer_val = ""
             
-            # Step 2: Form Submit karna (Jaise Search button dabaya ho)
+            token_tag = soup_main.find("input", {"name": "_token"})
+            referer_tag = soup_main.find("input", {"name": "referer"})
+            
+            if token_tag and referer_tag:
+                csrf_token = token_tag.get("value")
+                referer_val = referer_tag.get("value")
+            else:
+                # Agar Indown block kare, toh alternate method (Reels downloader) try karna
+                return jsonify({"status": "error", "message": "InDown Security Block. Please try again in 5 minutes."}), 503
+            
+            # Step 3: Story Data Fetch (POST)
             post_data = {
                 "link": insta_url,
-                "referer": referer,
+                "referer": referer_val,
                 "_token": csrf_token
             }
             
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                "Referer": "https://indown.io/insta-stories-download",
-                "X-Requested-With": "XMLHttpRequest"
-            }
-            
+            headers.update({"X-Requested-With": "XMLHttpRequest"})
             post_res = session.post("https://indown.io/download", data=post_data, headers=headers)
             soup_res = BeautifulSoup(post_res.text, "html.parser")
             
-            # Step 3: Server 1 aur Server 2 ke buttons dhoondna
+            # Download Buttons nikalna
             for a in soup_res.find_all('a', href=True):
                 href = a['href']
-                btn_text = a.get_text(strip=True).lower()
-                
-                # Screenshot ke mutabik 'Download Server 1' dhoond rahe hain
-                if "server" in btn_text or "download" in btn_text:
+                text = a.text.lower()
+                if "server" in text or "download" in text:
                     if "scontent" in href or "cdn" in href:
                         if href not in links_list:
                             links_list.append(href)
@@ -86,24 +87,20 @@ def insta_downloader():
         # --- REEL/POST LOGIC (SnapDownloader) ---
         else:
             mode = "video" if "/reel/" in insta_url else "photo"
-            base = "https://snapdownloader.com/tools/instagram-reels-downloader/download?url=" if mode == "video" else "https://snapdownloader.com/tools/instagram-photo-downloader/download?url="
-            target = base + requests.utils.quote(insta_url, safe="")
+            target_site = "https://snapdownloader.com/tools/instagram-reels-downloader/download?url=" if mode == "video" else "https://snapdownloader.com/tools/instagram-photo-downloader/download?url="
+            target = target_site + requests.utils.quote(insta_url, safe="")
             
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
-            r = requests.get(target, headers=headers, timeout=30)
+            r = requests.get(target, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}, timeout=30)
             soup = BeautifulSoup(r.text, "html.parser")
 
             for btn in soup.find_all('a', class_='btn-download'):
                 href = html.unescape(btn.get('href', ''))
-                text = btn.get_text(strip=True)
+                btn_text = btn.text.strip()
                 if "/v/t51.2885-19/" in href: continue
-                
-                if mode == "video":
-                    if ".mp4" in href or "video" in text.lower():
-                        if href not in links_list: links_list.append(href)
-                else:
-                    if "1080" in text or "image" in text.lower():
-                        if href not in links_list: links_list.append(href)
+                if mode == "video" and (".mp4" in href or "video" in btn_text.lower()):
+                    if href not in links_list: links_list.append(href)
+                elif mode == "photo" and ("1080" in btn_text or "image" in btn_text.lower()):
+                    if href not in links_list: links_list.append(href)
 
         if links_list:
             return jsonify({
@@ -114,11 +111,11 @@ def insta_downloader():
                 "credits": {"api_by": "@Configexe", "join": "@Teamexemods"}
             })
         else:
-            return jsonify({"status": "error", "message": "Could not find links. Make sure the story is public and not expired."}), 404
+            return jsonify({"status": "error", "message": "Links not found. Content may be private or InDown limit reached."}), 404
 
     except Exception as e:
-        return jsonify({"status": "error", "message": f"System Error: {str(e)}"}), 500
+        return jsonify({"status": "error", "message": f"Server Error: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run()
-    
+            
